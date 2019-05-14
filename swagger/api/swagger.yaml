@@ -1,0 +1,92 @@
+---
+swagger: "2.0"
+info:
+  description: "An API server for Minesweeper game"
+  version: "1.0.2"
+  title: "minesweeper-server"
+host: "minesweeper.tulentsev.com"
+schemes:
+- "http"
+consumes:
+- "application/json"
+produces:
+- "application/json"
+paths:
+  /newgame:
+    post:
+      parameters: []
+      responses:
+        200:
+          description: "create a new game and return board state"
+          schema:
+            $ref: "#/definitions/game"
+  /move:
+    post:
+      parameters:
+      - in: "body"
+        name: "move_info"
+        description: "Data about your move"
+        required: true
+        schema:
+          $ref: "#/definitions/move_info"
+        x-exportParamName: "MoveInfo"
+      responses:
+        200:
+          description: "return updated board state"
+          schema:
+            $ref: "#/definitions/game"
+definitions:
+  game:
+    type: "object"
+    properties:
+      game_id:
+        type: "string"
+        format: "uuid"
+        readOnly: true
+      status:
+        type: "string"
+        readOnly: true
+      board_width:
+        type: "integer"
+        readOnly: true
+        minimum: 0
+      board_height:
+        type: "integer"
+        readOnly: true
+        minimum: 0
+      mines_count:
+        type: "integer"
+        readOnly: true
+        minimum: 0
+      board_state:
+        type: "array"
+        items:
+          type: "string"
+      pretty_board_state:
+        type: "string"
+    example:
+      board_height: 0
+      board_state:
+      - "board_state"
+      - "board_state"
+      pretty_board_state: "pretty_board_state"
+      mines_count: 0
+      game_id: "046b6c7f-0b8a-43b9-b35d-6489e6daee91"
+      status: "status"
+      board_width: 0
+  move_info:
+    type: "object"
+    required:
+    - "game_id"
+    - "x"
+    - "y"
+    properties:
+      game_id:
+        type: "string"
+        format: "uuid"
+      x:
+        type: "integer"
+        minimum: 0
+      y:
+        type: "integer"
+        minimum: 0
