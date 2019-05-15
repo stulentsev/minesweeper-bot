@@ -16,6 +16,7 @@ func main() {
 	configuration := swagger.NewConfiguration()
 	configuration.BasePath = "http://localhost:3000"
 	client := swagger.NewAPIClient(configuration)
+
 	game, _, err := client.DefaultApi.NewgamePost(context.Background())
 	if err != nil {
 		panic(err)
@@ -107,11 +108,11 @@ func markNewBombs(game swagger.Game) []location {
 			continue
 		}
 
-		fmt.Printf("looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
+		//fmt.Printf("looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
 
 		locs := findUnknownCellsAround(game, x, y)
 
-		fmt.Printf("found %d unknown cells, but already see %d bombs\n", len(locs), len(bombLocs))
+		//fmt.Printf("found %d unknown cells, but already see %d bombs\n", len(locs), len(bombLocs))
 
 		if len(locs)+len(bombLocs) == count {
 			result = locs
@@ -171,7 +172,7 @@ func findSafeCells(game swagger.Game) {
 			unknownLocs := findUnknownCellsAround(game, x, y)
 			if len(unknownLocs) > 0 {
 				for _, loc := range unknownLocs {
-					fmt.Printf("queueing %v from cell (%d,%d)\n", loc, x, y)
+					//fmt.Printf("queueing %v from cell (%d,%d)\n", loc, x, y)
 
 					queueCellToOpen(loc)
 				}
@@ -204,7 +205,7 @@ func printBoardState(w io.Writer, game swagger.Game) {
 	for i := 0; i < int(game.BoardHeight); i++ {
 		fmt.Fprintf(w, "%d%s", i, verticalLine)
 		for j := 0; j < int(game.BoardWidth); j++ {
-			idx := j + i*int(game.BoardHeight)
+			idx := j + i*int(game.BoardWidth)
 			fmt.Fprint(w, game.BoardState[idx])
 			fmt.Fprint(w, " ")
 		}
