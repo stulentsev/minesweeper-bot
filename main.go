@@ -10,91 +10,94 @@ import (
 )
 import "minesweeper-bot/swagger"
 
-var cellsToOpen = make([]location, 0)
-
 func main() {
 	configuration := swagger.NewConfiguration()
 	configuration.BasePath = "http://localhost:3000"
 	client := swagger.NewAPIClient(configuration)
 
-	game, _, err := client.DefaultApi.NewgamePost(context.Background())
+	initialGame, _, err := client.DefaultApi.NewgamePost(context.Background())
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(game.PrettyBoardState)
+
+	gameInfo := newGameInfo(initialGame)
+	fmt.Println(gameInfo.PrettyBoardState)
 
 	// initial move, guaranteed safe
 	initialCell := location{
-		X: int(game.BoardWidth / 2),
-		Y: int(game.BoardHeight / 2),
+		X: int(gameInfo.BoardWidth / 2),
+		Y: int(gameInfo.BoardHeight / 2),
 	}
-	queueCellToOpen(initialCell)
-
-	bombLocations := make(map[location]bool)
+	gameInfo.queueCellToOpen(initialCell)
 
 	var currentTurnNumber int
 
 GameLoop:
 	for {
-		for len(cellsToOpen) > 0 {
-			cell := cellsToOpen[0]
-			cellsToOpen = cellsToOpen[1:]
+		gameInfo.addFullyRevealedLocations()
 
-			if fetchCell(game, cell.X, cell.Y) != "?" {
+		for len(gameInfo.cellsToOpen) > 0 {
+			cell := gameInfo.cellsToOpen[0]
+			gameInfo.cellsToOpen = gameInfo.cellsToOpen[1:]
+
+			if fetchCell(gameInfo, cell.X, cell.Y) != "?" {
 				continue
 			}
-			game, _, err = client.DefaultApi.MovePost(context.Background(), swagger.MoveInfo{
-				GameId: game.GameId,
-				X:      int32(cell.X),
-				Y:      int32(cell.Y),
-			})
-			if err != nil {
-				panic(err)
-			}
-			if gameIsFinished(game) {
-				fmt.Println(game.PrettyBoardState)
-				fmt.Println("returning due to", game.Status)
+			*gameInfo.Game = move(client, gameInfo, cell)
+
+			if gameIsFinished(gameInfo) {
+				fmt.Println(gameInfo.PrettyBoardState)
+				fmt.Println("returning due to", gameInfo.Status)
 				break GameLoop
 			}
 			fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
 
-			// refresh bombs
-			newBombLocs := markNewBombs(game)
-			for len(newBombLocs) > 0 {
-				applyBombLocations(game, bombLocations)
-				for _, loc := range newBombLocs {
-					if !bombLocations[loc] {
-						fmt.Println("found new bomb", loc)
-						bombLocations[loc] = true
-					}
-				}
-				applyBombLocations(game, bombLocations)
-				newBombLocs = markNewBombs(game)
-			}
-			printBoardState(os.Stdout, game)
+			refreshBombs(gameInfo, gameInfo.bombLocations)
+			printBoardState(os.Stdout, gameInfo)
 			currentTurnNumber++
-
 		}
 
-		findSafeCells(game)
+		findSafeCells(&gameInfo)
 
-		if len(cellsToOpen) == 0 {
-			panic("no obvious turn candidates!")
+		if len(gameInfo.cellsToOpen) == 0 {
+			loc, err := findLeastRiskyCell(gameInfo)
+			if err != nil {
+				panic("no obvious turn candidates!")
+			}
+			gameInfo.queueCellToOpen(loc)
 		}
 	}
 	fmt.Println("finished")
 }
 
-func queueCellToOpen(cell location) {
-	for _, loc := range cellsToOpen {
-		if cell == loc {
-			return
+func refreshBombs(game gameInformation, bombLocations map[location]bool) {
+	newBombLocs := markNewBombs(game)
+	for len(newBombLocs) > 0 {
+		applyBombLocations(game, bombLocations)
+		for _, loc := range newBombLocs {
+			if !bombLocations[loc] {
+				fmt.Println("found new bomb", loc)
+				bombLocations[loc] = true
+			}
 		}
+		applyBombLocations(game, bombLocations)
+		newBombLocs = markNewBombs(game)
 	}
-	cellsToOpen = append(cellsToOpen, cell)
 }
 
-func markNewBombs(game swagger.Game) []location {
+func move(client *swagger.APIClient, game gameInformation, cell location) swagger.Game {
+	newGameState, _, err := client.DefaultApi.MovePost(context.Background(), swagger.MoveInfo{
+		GameId: game.GameId,
+		X:      int32(cell.X),
+		Y:      int32(cell.Y),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return newGameState
+}
+
+func markNewBombs(game gameInformation) []location {
 	result := make([]location, 0)
 	for offset, cell := range game.BoardState {
 		count, err := strconv.Atoi(cell)
@@ -122,15 +125,15 @@ func markNewBombs(game swagger.Game) []location {
 	return result
 }
 
-func findUnknownCellsAround(game swagger.Game, x int, y int) []location {
+func findUnknownCellsAround(game gameInformation, x int, y int) []location {
 	return findCellsAround(game, x, y, "?")
 }
 
-func findBombsAround(game swagger.Game, x int, y int) []location {
+func findBombsAround(game gameInformation, x int, y int) []location {
 	return findCellsAround(game, x, y, "*")
 }
 
-func findCellsAround(game swagger.Game, x int, y int, marker string) []location {
+func findCellsAround(game gameInformation, x int, y int, marker string) []location {
 	result := make([]location, 0)
 	for i := x - 1; i <= x+1; i++ {
 		for j := y - 1; j <= y+1; j++ {
@@ -145,47 +148,102 @@ func findCellsAround(game swagger.Game, x int, y int, marker string) []location 
 	return result
 }
 
-func fetchCell(game swagger.Game, x, y int) string {
+func fetchCell(game gameInformation, x, y int) string {
 	offset := y*int(game.BoardWidth) + x
 	return game.BoardState[offset]
 }
 
-func applyBombLocations(game swagger.Game, bombLocations map[location]bool) {
+func applyBombLocations(game gameInformation, bombLocations map[location]bool) {
 	for loc := range bombLocations {
 		offset := loc.Y*int(game.BoardWidth) + loc.X
 		game.BoardState[offset] = "*"
 	}
 }
 
-func findSafeCells(game swagger.Game) {
-	for offset, cell := range game.BoardState {
-		count, err := strconv.Atoi(cell)
+// if we got to this point, then multiple cells can contain a bomb. Some more likely than others.
+// findLeastRiskyCells evaluates/intersects area of effect of numbered cells and tries to guess which
+// cells are more likely to contain a bomb. And, as a consequence, we get the "least likely" cells.
+func findLeastRiskyCell(game gameInformation) (location, error) {
+	probabilitiesOfBomb := make(map[location]float64)
+
+	for offset, cellState := range game.BoardState {
+		y := offset / int(game.BoardWidth)
+		x := offset - y*int(game.BoardWidth)
+
+		if game.fullyRevealedLocations[location{x, y}] {
+			continue
+		}
+
+		count, err := strconv.Atoi(cellState)
+		if err != nil { // not a numbered cell
+			continue
+		}
+
+		visibleBombs := findBombsAround(game, x, y)
+		unknowns := findUnknownCellsAround(game, x, y)
+		for _, loc := range unknowns {
+			additionalRisk := float64(count-len(visibleBombs)) / float64(len(unknowns))
+			fmt.Printf("new risk from cell (%d,%d) for cell %v: %f\n", x, y, loc, additionalRisk)
+			probabilitiesOfBomb[loc] += additionalRisk
+		}
+	}
+
+	fmt.Println("bomb probabilities", probabilitiesOfBomb)
+	// find loc with lowest probability
+	var leastRiskyLoc location
+	var leastRisk float64
+	found := false
+
+	for loc, risk := range probabilitiesOfBomb {
+		if !found {
+			leastRiskyLoc = loc
+			leastRisk = risk
+			found = true
+		} else {
+			if risk < leastRisk {
+				fmt.Printf("new least risky cell %f %v\n", risk, loc)
+				leastRisk = risk
+				leastRiskyLoc = loc
+			}
+		}
+	}
+	if found {
+		return leastRiskyLoc, nil
+	}
+	return location{}, fmt.Errorf("can't find least risky cell")
+}
+
+func findSafeCells(game *gameInformation) {
+	for offset, cellState := range game.BoardState {
+		y := offset / int(game.BoardWidth)
+		x := offset - y*int(game.BoardWidth)
+
+		if game.fullyRevealedLocations[location{x, y}] {
+			continue
+		}
+		count, err := strconv.Atoi(cellState)
 		if err != nil {
 			continue
 		}
-		y := offset / int(game.BoardWidth)
-		x := offset - y*int(game.BoardWidth)
 		//fmt.Printf("safe: looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
 
-		bombLocs := findBombsAround(game, x, y)
+		bombLocs := findBombsAround(*game, x, y)
 		if len(bombLocs) == count { // cell at (x,y) already sees all its bombs. It's safe to open all unknowns
-			unknownLocs := findUnknownCellsAround(game, x, y)
+			unknownLocs := findUnknownCellsAround(*game, x, y)
 			if len(unknownLocs) > 0 {
 				for _, loc := range unknownLocs {
-					//fmt.Printf("queueing %v from cell (%d,%d)\n", loc, x, y)
-
-					queueCellToOpen(loc)
+					game.queueCellToOpen(loc)
 				}
 			}
 		}
 	}
 }
 
-func gameIsFinished(game swagger.Game) bool {
+func gameIsFinished(game gameInformation) bool {
 	return game.Status != ""
 }
 
-func printBoardState(w io.Writer, game swagger.Game) {
+func printBoardState(w io.Writer, game gameInformation) {
 	leftTopCorner := "\u250c"
 	rightTopCorner := "\u2510"
 	leftBottomCorner := "\u2514"
@@ -194,30 +252,30 @@ func printBoardState(w io.Writer, game swagger.Game) {
 	horizontalLine := "\u2500"
 	verticalLine := "\u2502"
 
-	fmt.Fprint(w, "  ")
+	_, _ = fmt.Fprint(w, "  ")
 	for i := 0; i < int(game.BoardWidth); i++ {
-		fmt.Fprint(w, i)
-		fmt.Fprint(w, " ")
+		_, _ = fmt.Fprint(w, i)
+		_, _ = fmt.Fprint(w, " ")
 	}
-	fmt.Fprintln(w, "")
+	_, _ = fmt.Fprintln(w, "")
 
-	fmt.Fprintf(w, " %s%s%s\n", leftTopCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightTopCorner)
+	_, _ = fmt.Fprintf(w, " %s%s%s\n", leftTopCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightTopCorner)
 	for i := 0; i < int(game.BoardHeight); i++ {
-		fmt.Fprintf(w, "%d%s", i, verticalLine)
+		_, _ = fmt.Fprintf(w, "%d%s", i, verticalLine)
 		for j := 0; j < int(game.BoardWidth); j++ {
 			idx := j + i*int(game.BoardWidth)
-			fmt.Fprint(w, game.BoardState[idx])
-			fmt.Fprint(w, " ")
+			_, _ = fmt.Fprint(w, game.BoardState[idx])
+			_, _ = fmt.Fprint(w, " ")
 		}
-		fmt.Fprintf(w, "%s%d\n", verticalLine, i)
+		_, _ = fmt.Fprintf(w, "%s%d\n", verticalLine, i)
 	}
 
-	fmt.Fprintf(w, " %s%s%s\n", leftBottomCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightBottomCorner)
+	_, _ = fmt.Fprintf(w, " %s%s%s\n", leftBottomCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightBottomCorner)
 
-	fmt.Fprint(w, "  ")
+	_, _ = fmt.Fprint(w, "  ")
 	for i := 0; i < int(game.BoardWidth); i++ {
-		fmt.Fprint(w, i)
-		fmt.Fprint(w, " ")
+		_, _ = fmt.Fprint(w, i)
+		_, _ = fmt.Fprint(w, " ")
 	}
-	fmt.Fprintln(w, "")
+	_, _ = fmt.Fprintln(w, "")
 }
