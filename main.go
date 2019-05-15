@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 )
 import "minesweeper-bot/swagger"
@@ -40,27 +39,27 @@ GameLoop:
 			cell := gameInfo.cellsToOpen[0]
 			gameInfo.cellsToOpen = gameInfo.cellsToOpen[1:]
 
-			if fetchCell(gameInfo, cell.X, cell.Y) != "?" {
+			if gameInfo.fetchCell(cell.X, cell.Y) != "?" {
 				continue
 			}
 			*gameInfo.Game = move(client, gameInfo, cell)
 
-			if gameIsFinished(gameInfo) {
+			if gameInfo.IsFinished() {
 				fmt.Println(gameInfo.PrettyBoardState)
 				fmt.Println("returning due to", gameInfo.Status)
 				break GameLoop
 			}
 			fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
 
-			refreshBombs(gameInfo, gameInfo.bombLocations)
+			gameInfo.refreshBombs()
 			printBoardState(os.Stdout, gameInfo)
 			currentTurnNumber++
 		}
 
-		findSafeCells(&gameInfo)
+		gameInfo.findSafeCells()
 
 		if len(gameInfo.cellsToOpen) == 0 {
-			loc, err := findLeastRiskyCell(gameInfo)
+			loc, err := gameInfo.findLeastRiskyCell()
 			if err != nil {
 				panic("no obvious turn candidates!")
 			}
@@ -70,20 +69,6 @@ GameLoop:
 	fmt.Println("finished")
 }
 
-func refreshBombs(game gameInformation, bombLocations map[location]bool) {
-	newBombLocs := markNewBombs(game)
-	for len(newBombLocs) > 0 {
-		applyBombLocations(game, bombLocations)
-		for _, loc := range newBombLocs {
-			if !bombLocations[loc] {
-				fmt.Println("found new bomb", loc)
-				bombLocations[loc] = true
-			}
-		}
-		applyBombLocations(game, bombLocations)
-		newBombLocs = markNewBombs(game)
-	}
-}
 
 func move(client *swagger.APIClient, game gameInformation, cell location) swagger.Game {
 	newGameState, _, err := client.DefaultApi.MovePost(context.Background(), swagger.MoveInfo{
@@ -97,151 +82,6 @@ func move(client *swagger.APIClient, game gameInformation, cell location) swagge
 	return newGameState
 }
 
-func markNewBombs(game gameInformation) []location {
-	result := make([]location, 0)
-	for offset, cell := range game.BoardState {
-		count, err := strconv.Atoi(cell)
-		if err != nil {
-			continue
-		}
-		y := offset / int(game.BoardWidth)
-		x := offset - y*int(game.BoardWidth)
-		bombLocs := findBombsAround(game, x, y)
-		if len(bombLocs) == count {
-			continue
-		}
-
-		//fmt.Printf("looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
-
-		locs := findUnknownCellsAround(game, x, y)
-
-		//fmt.Printf("found %d unknown cells, but already see %d bombs\n", len(locs), len(bombLocs))
-
-		if len(locs)+len(bombLocs) == count {
-			result = locs
-			break
-		}
-	}
-	return result
-}
-
-func findUnknownCellsAround(game gameInformation, x int, y int) []location {
-	return findCellsAround(game, x, y, "?")
-}
-
-func findBombsAround(game gameInformation, x int, y int) []location {
-	return findCellsAround(game, x, y, "*")
-}
-
-func findCellsAround(game gameInformation, x int, y int, marker string) []location {
-	result := make([]location, 0)
-	for i := x - 1; i <= x+1; i++ {
-		for j := y - 1; j <= y+1; j++ {
-			if i == x && j == y || i < 0 || j < 0 || i >= int(game.BoardWidth) || j >= int(game.BoardHeight) {
-				continue
-			}
-			if fetchCell(game, i, j) == marker {
-				result = append(result, location{X: i, Y: j})
-			}
-		}
-	}
-	return result
-}
-
-func fetchCell(game gameInformation, x, y int) string {
-	offset := y*int(game.BoardWidth) + x
-	return game.BoardState[offset]
-}
-
-func applyBombLocations(game gameInformation, bombLocations map[location]bool) {
-	for loc := range bombLocations {
-		offset := loc.Y*int(game.BoardWidth) + loc.X
-		game.BoardState[offset] = "*"
-	}
-}
-
-// if we got to this point, then multiple cells can contain a bomb. Some more likely than others.
-// findLeastRiskyCells evaluates/intersects area of effect of numbered cells and tries to guess which
-// cells are more likely to contain a bomb. And, as a consequence, we get the "least likely" cells.
-func findLeastRiskyCell(game gameInformation) (location, error) {
-	probabilitiesOfBomb := make(map[location]float64)
-
-	for offset, cellState := range game.BoardState {
-		y := offset / int(game.BoardWidth)
-		x := offset - y*int(game.BoardWidth)
-
-		if game.fullyRevealedLocations[location{x, y}] {
-			continue
-		}
-
-		count, err := strconv.Atoi(cellState)
-		if err != nil { // not a numbered cell
-			continue
-		}
-
-		visibleBombs := findBombsAround(game, x, y)
-		unknowns := findUnknownCellsAround(game, x, y)
-		for _, loc := range unknowns {
-			additionalRisk := float64(count-len(visibleBombs)) / float64(len(unknowns))
-			fmt.Printf("new risk from cell (%d,%d) for cell %v: %f\n", x, y, loc, additionalRisk)
-			probabilitiesOfBomb[loc] += additionalRisk
-		}
-	}
-
-	fmt.Println("bomb probabilities", probabilitiesOfBomb)
-	// find loc with lowest probability
-	var leastRiskyLoc location
-	var leastRisk float64
-	found := false
-
-	for loc, risk := range probabilitiesOfBomb {
-		if !found {
-			leastRiskyLoc = loc
-			leastRisk = risk
-			found = true
-		} else {
-			if risk < leastRisk {
-				fmt.Printf("new least risky cell %f %v\n", risk, loc)
-				leastRisk = risk
-				leastRiskyLoc = loc
-			}
-		}
-	}
-	if found {
-		return leastRiskyLoc, nil
-	}
-	return location{}, fmt.Errorf("can't find least risky cell")
-}
-
-func findSafeCells(game *gameInformation) {
-	for offset, cellState := range game.BoardState {
-		y := offset / int(game.BoardWidth)
-		x := offset - y*int(game.BoardWidth)
-
-		if game.fullyRevealedLocations[location{x, y}] {
-			continue
-		}
-		count, err := strconv.Atoi(cellState)
-		if err != nil {
-			continue
-		}
-		//fmt.Printf("safe: looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
-
-		bombLocs := findBombsAround(*game, x, y)
-		if len(bombLocs) == count { // cell at (x,y) already sees all its bombs. It's safe to open all unknowns
-			unknownLocs := findUnknownCellsAround(*game, x, y)
-			if len(unknownLocs) > 0 {
-				for _, loc := range unknownLocs {
-					game.queueCellToOpen(loc)
-				}
-			}
-		}
-	}
-}
-
-func gameIsFinished(game gameInformation) bool {
-	return game.Status != ""
-}
 
 func printBoardState(w io.Writer, game gameInformation) {
 	leftTopCorner := "\u250c"
