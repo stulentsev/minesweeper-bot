@@ -16,6 +16,8 @@ type gameInformation struct {
 	bombLocations map[location]bool
 
 	fullyRevealedLocations map[location]bool
+
+	verbose bool
 }
 
 func newGameInfo(game swagger.Game) gameInformation {
@@ -35,7 +37,6 @@ func (game *gameInformation) queueCellToOpen(cell location) {
 	}
 
 	game.cellsToOpen = append(game.cellsToOpen, cell)
-	fmt.Println(game.cellsToOpen)
 }
 
 func (game *gameInformation) addFullyRevealedLocations() {
@@ -61,7 +62,6 @@ func (game *gameInformation) refreshBombs() {
 		game.applyBombLocations(game.bombLocations)
 		for _, loc := range newBombLocs {
 			if !game.bombLocations[loc] {
-				fmt.Println("found new bomb", loc)
 				game.bombLocations[loc] = true
 			}
 		}
@@ -84,11 +84,7 @@ func (game *gameInformation) markNewBombs() []location {
 			continue
 		}
 
-		//fmt.Printf("looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
-
 		locs := game.findUnknownCellsAround(x, y)
-
-		//fmt.Printf("found %d unknown cells, but already see %d bombs\n", len(locs), len(bombLocs))
 
 		if len(locs)+len(bombLocs) == count {
 			result = locs
@@ -156,12 +152,10 @@ func (game *gameInformation) findLeastRiskyCell() (location, error) {
 		unknowns := game.findUnknownCellsAround(x, y)
 		for _, loc := range unknowns {
 			additionalRisk := float64(count-len(visibleBombs)) / float64(len(unknowns))
-			fmt.Printf("new risk from cell (%d,%d) for cell %v: %f\n", x, y, loc, additionalRisk)
 			probabilitiesOfBomb[loc] += additionalRisk
 		}
 	}
 
-	fmt.Println("bomb probabilities", probabilitiesOfBomb)
 	// find loc with lowest probability
 	var leastRiskyLoc location
 	var leastRisk float64
@@ -174,7 +168,6 @@ func (game *gameInformation) findLeastRiskyCell() (location, error) {
 			found = true
 		} else {
 			if risk < leastRisk {
-				fmt.Printf("new least risky cell %f %v\n", risk, loc)
 				leastRisk = risk
 				leastRiskyLoc = loc
 			}
@@ -198,7 +191,6 @@ func (game *gameInformation) findSafeCells() {
 		if err != nil {
 			continue
 		}
-		//fmt.Printf("safe: looking for %d bombs around (%d,%d) offset %d\n", count, x, y, offset)
 
 		bombLocs := game.findBombsAround(x, y)
 		if len(bombLocs) == count { // cell at (x,y) already sees all its bombs. It's safe to open all unknowns
@@ -214,4 +206,26 @@ func (game *gameInformation) findSafeCells() {
 
 func (game *gameInformation) IsFinished() bool {
 	return game.Status != ""
+}
+
+func (game *gameInformation) Result() gameResult {
+	return gameResult{
+		Status:     game.Status,
+		MinesFound: game.NumberOfCorrectlyGuessedBombs(),
+		MinesTotal: int(game.MinesCount),
+	}
+}
+
+func (game *gameInformation) NumberOfCorrectlyGuessedBombs() int {
+	if game.Status == "win" {
+		return int(game.MinesCount)
+	}
+
+	found := 0
+	for loc := range game.bombLocations {
+		if game.fetchCell(loc.X, loc.Y) == "*" {
+			found++
+		}
+	}
+	return found
 }

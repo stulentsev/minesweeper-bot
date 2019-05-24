@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
+	"sort"
 	"strings"
 )
 import "minesweeper-bot/swagger"
@@ -14,24 +14,58 @@ func main() {
 	configuration.BasePath = "http://localhost:3000"
 	client := swagger.NewAPIClient(configuration)
 
+	gamesToPlay := 1000
+	results := make(map[string]int)
+	progress := make(map[int]int)
+	for i := 0; i < gamesToPlay; i++ {
+		thisGameResult := playNewGame(client)
+		results[thisGameResult.Status]++
+
+		progress[thisGameResult.MinesFound]++
+
+		fmt.Println(results)
+	}
+	printProgressStats(progress)
+}
+
+func printProgressStats(gamesByMinesFound map[int]int) {
+	fmt.Println("progress in lost games")
+	minesFoundKeys := make([]int, 0, len(gamesByMinesFound))
+	for key := range gamesByMinesFound {
+		minesFoundKeys = append(minesFoundKeys, key)
+	}
+	sort.Ints(minesFoundKeys)
+
+	for _, key := range minesFoundKeys {
+		fmt.Printf("Mines found: %d, games: %d\n", key, gamesByMinesFound[key])
+	}
+}
+
+type gameResult struct {
+	Status string
+	MinesFound int
+	MinesTotal int
+}
+
+func (gr gameResult) MinesFoundPercentage() float64 {
+	return float64(gr.MinesFound) / float64(gr.MinesTotal)
+}
+
+func playNewGame(client *swagger.APIClient) gameResult {
 	initialGame, _, err := client.DefaultApi.NewgamePost(context.Background())
 	if err != nil {
 		panic(err)
 	}
-
 	gameInfo := newGameInfo(initialGame)
-	fmt.Println(gameInfo.PrettyBoardState)
-
+	//fmt.Println(gameInfo.PrettyBoardState)
 	// initial move, guaranteed safe
 	initialCell := location{
 		X: int(gameInfo.BoardWidth / 2),
 		Y: int(gameInfo.BoardHeight / 2),
 	}
 	gameInfo.queueCellToOpen(initialCell)
-
 	var currentTurnNumber int
 
-GameLoop:
 	for {
 		gameInfo.addFullyRevealedLocations()
 
@@ -45,14 +79,14 @@ GameLoop:
 			*gameInfo.Game = move(client, gameInfo, cell)
 
 			if gameInfo.IsFinished() {
-				fmt.Println(gameInfo.PrettyBoardState)
-				fmt.Println("returning due to", gameInfo.Status)
-				break GameLoop
+				//fmt.Println(gameInfo.PrettyBoardState)
+				//fmt.Println("returning due to", gameInfo.Status)
+				return gameInfo.Result()
 			}
-			fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
+			//fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
 
 			gameInfo.refreshBombs()
-			printBoardState(os.Stdout, gameInfo)
+			//printBoardState(os.Stdout, gameInfo)
 			currentTurnNumber++
 		}
 
@@ -61,12 +95,15 @@ GameLoop:
 		if len(gameInfo.cellsToOpen) == 0 {
 			loc, err := gameInfo.findLeastRiskyCell()
 			if err != nil {
-				panic("no obvious turn candidates!")
+				return gameResult{
+					Status:     "unsure",
+					MinesFound: gameInfo.NumberOfCorrectlyGuessedBombs(),
+					MinesTotal: int(gameInfo.MinesCount),
+				}
 			}
 			gameInfo.queueCellToOpen(loc)
 		}
 	}
-	fmt.Println("finished")
 }
 
 
