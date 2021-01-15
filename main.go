@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"minesweeper-bot/swagger"
-	"os"
 	"sort"
 	"strings"
 )
@@ -87,7 +86,7 @@ func playNewGame(client *swagger.APIClient) gameResult {
 			//fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
 
 			gameInfo.refreshBombs()
-			printBoardState(os.Stdout, gameInfo)
+			//printBoardState(os.Stdout, gameInfo)
 			currentTurnNumber++
 		}
 
