@@ -144,7 +144,7 @@ func printBoardState(w io.Writer, game gameInformation) {
 		_, _ = fmt.Fprintf(w, "%2d%s", i, verticalLine)
 		for j := 0; j < int(game.BoardWidth); j++ {
 			idx := j + i*int(game.BoardWidth)
-			_, _ = fmt.Fprint(w, game.BoardState[idx])
+			_, _ = fmt.Fprint(w, colored(game.BoardState[idx]))
 			_, _ = fmt.Fprint(w, " ")
 		}
 		_, _ = fmt.Fprintf(w, "%s%d\n", verticalLine, i)
@@ -162,4 +162,15 @@ func printBoardState(w io.Writer, game gameInformation) {
 		_, _ = fmt.Fprint(w, " ")
 	}
 	_, _ = fmt.Fprintln(w, "")
+}
+
+// https://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html
+func colored(str string) string {
+	if str == "?" {
+		return fmt.Sprintf("\u001b[38;5;242m%s\u001b[0m", str)
+	} else if str == "*" {
+		return fmt.Sprintf("\u001b[31m%s\u001b[0m", str)
+	} else { // digit?
+		return fmt.Sprintf("\u001b[38;5;159m%s\u001b[0m", str)
+	}
 }
