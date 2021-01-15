@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"minesweeper-bot/swagger"
+	"os"
 	"sort"
 	"strings"
 )
-import "minesweeper-bot/swagger"
 
 func main() {
 	configuration := swagger.NewConfiguration()
@@ -42,7 +43,7 @@ func printProgressStats(gamesByMinesFound map[int]int) {
 }
 
 type gameResult struct {
-	Status string
+	Status     string
 	MinesFound int
 	MinesTotal int
 }
@@ -86,7 +87,7 @@ func playNewGame(client *swagger.APIClient) gameResult {
 			//fmt.Printf("turn %d, opening (%d, %d) from queue\n", currentTurnNumber, cell.X, cell.Y)
 
 			gameInfo.refreshBombs()
-			//printBoardState(os.Stdout, gameInfo)
+			printBoardState(os.Stdout, gameInfo)
 			currentTurnNumber++
 		}
 
@@ -106,7 +107,6 @@ func playNewGame(client *swagger.APIClient) gameResult {
 	}
 }
 
-
 func move(client *swagger.APIClient, game gameInformation, cell location) swagger.Game {
 	newGameState, _, err := client.DefaultApi.MovePost(context.Background(), swagger.MoveInfo{
 		GameId: game.GameId,
@@ -119,7 +119,6 @@ func move(client *swagger.APIClient, game gameInformation, cell location) swagge
 	return newGameState
 }
 
-
 func printBoardState(w io.Writer, game gameInformation) {
 	leftTopCorner := "\u250c"
 	rightTopCorner := "\u2510"
@@ -131,14 +130,18 @@ func printBoardState(w io.Writer, game gameInformation) {
 
 	_, _ = fmt.Fprint(w, "  ")
 	for i := 0; i < int(game.BoardWidth); i++ {
-		_, _ = fmt.Fprint(w, i)
+		if i%10 == 0 {
+			_, _ = fmt.Fprint(w, i)
+		} else {
+			_, _ = fmt.Fprint(w, ".")
+		}
 		_, _ = fmt.Fprint(w, " ")
 	}
 	_, _ = fmt.Fprintln(w, "")
 
-	_, _ = fmt.Fprintf(w, " %s%s%s\n", leftTopCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightTopCorner)
+	_, _ = fmt.Fprintf(w, "  %s%s%s\n", leftTopCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightTopCorner)
 	for i := 0; i < int(game.BoardHeight); i++ {
-		_, _ = fmt.Fprintf(w, "%d%s", i, verticalLine)
+		_, _ = fmt.Fprintf(w, "%2d%s", i, verticalLine)
 		for j := 0; j < int(game.BoardWidth); j++ {
 			idx := j + i*int(game.BoardWidth)
 			_, _ = fmt.Fprint(w, game.BoardState[idx])
@@ -147,11 +150,15 @@ func printBoardState(w io.Writer, game gameInformation) {
 		_, _ = fmt.Fprintf(w, "%s%d\n", verticalLine, i)
 	}
 
-	_, _ = fmt.Fprintf(w, " %s%s%s\n", leftBottomCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightBottomCorner)
+	_, _ = fmt.Fprintf(w, "  %s%s%s\n", leftBottomCorner, strings.Repeat(horizontalLine, int(game.BoardWidth)*2), rightBottomCorner)
 
 	_, _ = fmt.Fprint(w, "  ")
 	for i := 0; i < int(game.BoardWidth); i++ {
-		_, _ = fmt.Fprint(w, i)
+		if i%10 == 0 {
+			_, _ = fmt.Fprint(w, i)
+		} else {
+			_, _ = fmt.Fprint(w, ".")
+		}
 		_, _ = fmt.Fprint(w, " ")
 	}
 	_, _ = fmt.Fprintln(w, "")
